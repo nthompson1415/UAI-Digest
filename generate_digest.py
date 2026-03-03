@@ -283,12 +283,16 @@ def fetch_category(client, category):
         sources = []
         grounding = getattr(candidate, "grounding_metadata", None)
         if grounding and hasattr(grounding, "grounding_chunks"):
+            total_chunks = len(grounding.grounding_chunks or [])
             for chunk in (grounding.grounding_chunks or []):
                 if hasattr(chunk, "web") and chunk.web:
                     sources.append({
                         "title": getattr(chunk.web, "title", ""),
                         "url": getattr(chunk.web, "uri", ""),
                     })
+            print(f"  [{category['id']}] DEBUG: {len(sources)} web chunks found out of {total_chunks} total chunks")
+        else:
+            print(f"  [{category['id']}] DEBUG: No grounding_metadata or chunks found")
 
         # Parse JSON from response
         clean = text.replace("```json", "").replace("```", "").strip()
@@ -298,6 +302,14 @@ def fetch_category(client, category):
         if start >= 0 and end > start:
             parsed = json.loads(clean[start:end])
             items = parsed.get("items", [])
+
+            # DEBUG: Show what Gemini returned
+            if items:
+                sample_item = items[0]
+                has_chunk_idx = "grounding_chunk_index" in sample_item
+                has_source_url = "source_url" in sample_item
+                print(f"  [{category['id']}] DEBUG: Sample item fields: {list(sample_item.keys())}")
+                print(f"  [{category['id']}] DEBUG: Has grounding_chunk_index? {has_chunk_idx}, Has source_url? {has_source_url}")
 
             # Map grounding_chunk_indices to actual URLs from search results
             # This uses the indices Gemini returned, eliminating URL guessing
