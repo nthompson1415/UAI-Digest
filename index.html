@@ -175,6 +175,100 @@
       color: var(--green);
     }
 
+    /* ── Category Cards (Homepage) ── */
+    .category-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .category-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 16px 18px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      text-align: left;
+    }
+
+    .category-card:hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-green);
+    }
+
+    .category-card.is-expanded {
+      border-color: var(--border-green);
+      background: var(--bg-card-hover);
+    }
+
+    .category-card__header {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--green);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .category-card__header::after {
+      content: '→';
+      font-size: 11px;
+      opacity: 0.5;
+      transition: transform 0.2s ease;
+    }
+
+    .category-card.is-expanded .category-card__header::after {
+      content: '↑';
+    }
+
+    .category-card__preview {
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    .category-card__preview-item {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+      padding: 2px 0;
+    }
+
+    .category-card__preview-item::before {
+      content: '· ';
+      color: var(--green-dim);
+    }
+
+    .category-card__expand {
+      display: none;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      animation: fadeUp 0.3s ease;
+    }
+
+    .category-card.is-expanded .category-card__expand {
+      display: block;
+    }
+
+    .category-card__expand .digest {
+      margin: 0;
+    }
+
+    .category-card__expand .digest h2 {
+      display: none;
+    }
+
+    .category-card__expand .digest hr {
+      margin: 16px 0;
+    }
+
     /* ── Digest Content ── */
     .digest {
       animation: fadeUp 0.5s ease;
@@ -365,37 +459,101 @@
   </div>
 
   <script>
+    const PREVIEW_ITEMS = 3;
+    const HEADLINE_MAX_LEN = 72;
+
+    function parseDigest(md) {
+      const categories = [];
+      const sections = md.split(/\n## (?=[^\n])/);
+      const skipSections = ['All Sources Cited', '📚'];
+
+      for (const section of sections) {
+        const lines = section.trim().split('\n');
+        if (lines.length === 0) continue;
+
+        const headerLine = lines[0];
+        const title = headerLine.replace(/^#+\s*/, '').trim();
+        if (skipSections.some(s => title.includes(s))) continue;
+        if (title.includes('UAI WEEKLY') || title.includes('Brought To You')) continue;
+
+        const headlines = [];
+        for (let i = 1; i < lines.length; i++) {
+          const headlineMatch = lines[i].match(/^\*\*(\d+\.\s+.+?)\*\*/);
+          if (headlineMatch) {
+            const raw = headlineMatch[1].replace(/^\d+\.\s+/, '');
+            headlines.push(raw.length > HEADLINE_MAX_LEN ? raw.slice(0, HEADLINE_MAX_LEN) + '…' : raw);
+          }
+        }
+
+        if (headlines.length === 0) continue;
+
+        const fullMarkdown = '## ' + section.trim();
+        categories.push({ title, headlines, fullMarkdown });
+      }
+
+      return categories;
+    }
+
+    function truncate(str, len) {
+      return str.length > len ? str.slice(0, len) + '…' : str;
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function renderCategoryCard(cat, index) {
+      const previewHeadlines = cat.headlines.slice(0, PREVIEW_ITEMS);
+      const moreCount = cat.headlines.length - PREVIEW_ITEMS;
+
+      const previewHtml = previewHeadlines
+        .map(h => `<div class="category-card__preview-item">${escapeHtml(truncate(h, HEADLINE_MAX_LEN))}</div>`)
+        .join('') + (moreCount > 0 ? `<div class="category-card__preview-item" style="opacity:0.6">+${moreCount} more</div>` : '');
+
+      const expandHtml = marked.parse(cat.fullMarkdown);
+
+      return `
+        <div class="category-card" data-index="${index}">
+          <div class="category-card__header">${escapeHtml(cat.title)}</div>
+          <div class="category-card__preview">${previewHtml}</div>
+          <div class="category-card__expand"><div class="digest">${expandHtml}</div></div>
+        </div>
+      `;
+    }
+
     async function loadDigest() {
       const contentEl = document.getElementById('content');
       const footerEl = document.getElementById('footer');
       const dateEl = document.getElementById('dateRange');
 
       try {
-        // Use base path so fetch works with or without trailing slash in URL
-        // (e.g. /UAI-Digest vs /UAI-Digest/)
         const base = document.location.pathname.replace(/\/?$/, '/');
         const resp = await fetch(base + 'digests/latest.md');
 
-        if (!resp.ok) {
-          throw new Error(`HTTP ${resp.status}`);
-        }
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
 
         const md = await resp.text();
 
-        // Extract date range from the markdown (the bold line like **Feb 18 – Mar 3, 2026**)
         const dateMatch = md.match(/\*\*(.+?)\*\*/);
-        if (dateMatch) {
-          dateEl.textContent = dateMatch[1];
-        } else {
-          dateEl.textContent = new Date().toLocaleDateString('en-US', {
-            month: 'short', day: 'numeric', year: 'numeric'
-          });
-        }
+        dateEl.textContent = dateMatch ? dateMatch[1] : new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-        // Parse markdown to HTML
-        const html = marked.parse(md);
-        contentEl.innerHTML = `<div class="digest">${html}</div>`;
+        const categories = parseDigest(md);
+        const cardsHtml = categories.map((c, i) => renderCategoryCard(c, i)).join('');
+        contentEl.innerHTML = `<div class="category-grid">${cardsHtml}</div>`;
         footerEl.style.display = 'block';
+
+        contentEl.querySelectorAll('.category-card').forEach(card => {
+          card.addEventListener('click', (e) => {
+            if (e.target.closest('a')) return;
+            const wasExpanded = card.classList.contains('is-expanded');
+            contentEl.querySelectorAll('.category-card').forEach(c => c.classList.remove('is-expanded'));
+            if (!wasExpanded) card.classList.add('is-expanded');
+          });
+        });
 
       } catch (err) {
         contentEl.innerHTML = `
