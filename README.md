@@ -147,6 +147,12 @@ Every link in the digest points to a freely accessible source.
 
 ---
 
+## Reporting Errors
+
+Found a wrong URL, bad summary, or missing story? [Open an error report](https://github.com/nthompson1415/UAI-Digest/issues/new?template=error_report.md) — the template will ask for the digest date, category, and what went wrong.
+
+---
+
 ## License
 
 MIT — do whatever you want with it.
