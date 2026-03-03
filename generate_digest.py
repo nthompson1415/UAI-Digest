@@ -18,7 +18,7 @@ from google.genai.types import Tool, GenerateContentConfig, GoogleSearch
 
 # ── Config ──────────────────────────────────────────────────────────
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-MODEL_ID = "gemini-1.5-flash"
+MODEL_ID = "models/gemini-2.5-flash-lite"
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "digests")
 
