@@ -132,11 +132,93 @@ def _normalize_for_match(s):
     return "".join(c for c in s.lower() if c.isalnum() or c.isspace())
 
 
+def _apply_grounding_support_urls(items, full_text, grounding):
+    """
+    Use grounding_supports to map each digest item to the actual URLs the model
+    selected from search results. The API exposes which grounding chunks support
+    which segments of the response — we use that instead of the LLM-generated URLs.
+    """
+    if not grounding or not items:
+        return items
+
+    try:
+        chunks = getattr(grounding, "grounding_chunks", None) or []
+        supports = getattr(grounding, "grounding_supports", None) or []
+    except Exception:
+        return items
+
+    if not chunks or not supports:
+        return items
+
+    # Build chunk URL list (only web chunks have URLs)
+    chunk_urls = []
+    for chunk in chunks:
+        url = ""
+        if hasattr(chunk, "web") and chunk.web:
+            url = getattr(chunk.web, "uri", "") or ""
+        chunk_urls.append(url)
+
+    # Search from this position so duplicate titles map to correct items in order
+    search_start = 0
+
+    for item in items:
+        title = item.get("title", "")
+        if not title:
+            continue
+
+        # Find where this title appears (advance search_start so duplicates map correctly)
+        # Try literal first; fallback to JSON-encoded form for titles with " or \
+        search_str = title
+        pos = full_text.find(search_str, search_start)
+        if pos < 0 and ('"' in title or '\\' in title):
+            try:
+                search_str = json.dumps(title)[1:-1]  # Inner content without outer quotes
+                pos = full_text.find(search_str, search_start)
+            except Exception:
+                pass
+        if pos < 0:
+            continue
+        search_start = pos + len(search_str)
+
+        item_start, item_end = pos, pos + len(search_str)
+
+        # Find which grounding support segment overlaps with this position
+        best_url = None
+        best_overlap = 0
+
+        for support in supports:
+            segment = getattr(support, "segment", None)
+            if not segment:
+                continue
+            start = getattr(segment, "start_index", None) or getattr(segment, "startIndex", 0) or 0
+            end = getattr(segment, "end_index", None) or getattr(segment, "endIndex", 0) or 0
+
+            # Check overlap (segment supports this part of the response)
+            overlap_start = max(item_start, start)
+            overlap_end = min(item_end, end)
+            if overlap_end > overlap_start:
+                overlap = overlap_end - overlap_start
+                if overlap > best_overlap:
+                    indices = getattr(support, "grounding_chunk_indices", None) or getattr(support, "groundingChunkIndices", []) or []
+                    if indices:
+                        chunk_idx = indices[0]
+                        if 0 <= chunk_idx < len(chunk_urls) and chunk_urls[chunk_idx]:
+                            best_overlap = overlap
+                            best_url = chunk_urls[chunk_idx]
+
+        if best_url:
+            old_url = item.get("source_url", "")
+            if best_url != old_url:
+                item["source_url"] = best_url
+                print(f"    URL from grounding: {_domain(old_url)} -> {_domain(best_url)}")
+
+    return items
+
+
 def _correct_urls_from_grounding(items, grounding_sources):
     """
-    When grounding metadata is available, prefer grounding URLs over Gemini's
-    stated URLs. Grounding URLs come from actual search results and are often
-    more accurate (canonical vs syndicated).
+    Fallback: when grounding_supports is unavailable, use fuzzy matching against
+    grounding_chunks. Less reliable than segment-based mapping.
     """
     if not grounding_sources:
         return items
@@ -156,17 +238,14 @@ def _correct_urls_from_grounding(items, grounding_sources):
             if not g_url or not g_title:
                 continue
 
-            # Score: title overlap, shared keywords (ai, model, 2026, etc.)
             score = 0
             title_words = set(w for w in item_title.split() if len(w) > 2)
             g_words = set(g_title.split())
             overlap = len(title_words & g_words) / max(len(title_words), 1)
             score += overlap * 2
 
-            # Bonus for domain/site name in grounding (e.g. "mean" "ceo")
             if item_source and item_source in g_title:
                 score += 1
-            # Bonus for key terms like "march", "2026", "model" in both
             key_terms = {"ai", "model", "2026", "2025", "march", "february", "release"}
             shared = (title_words | set(item_source.split())) & g_words & key_terms
             score += len(shared) * 0.3
@@ -175,11 +254,10 @@ def _correct_urls_from_grounding(items, grounding_sources):
                 best_score = score
                 best_match = g_url
 
-        # Only replace when switching domain (syndication fix) and match is strong
         if best_match and best_match != item_url and best_score >= 1.0:
             if _domain(item_url) != _domain(best_match):
                 item["source_url"] = best_match
-                print(f"    URL corrected: {_domain(item_url)} -> {_domain(best_match)}")
+                print(f"    URL corrected (fallback): {_domain(item_url)} -> {_domain(best_match)}")
 
     return items
 
@@ -266,19 +344,23 @@ def fetch_category(client, category):
             ),
         )
 
-        # Extract text from response
+        if not response.candidates:
+            print(f"  [{category['id']}] No candidates in response")
+            return {"id": category["id"], "items": [], "sources": []}
+
+        candidate = response.candidates[0]
         text = ""
-        for part in response.candidates[0].content.parts:
-            if part.text:
+        for part in (candidate.content.parts or []):
+            if getattr(part, "text", None):
                 text += part.text
 
         if not text.strip():
             print(f"  [{category['id']}] No text in response")
             return {"id": category["id"], "items": [], "sources": []}
 
-        # Extract grounding sources if available
+        # Extract grounding metadata
         sources = []
-        grounding = getattr(response.candidates[0], "grounding_metadata", None)
+        grounding = getattr(candidate, "grounding_metadata", None)
         if grounding and hasattr(grounding, "grounding_chunks"):
             for chunk in (grounding.grounding_chunks or []):
                 if hasattr(chunk, "web") and chunk.web:
@@ -296,9 +378,13 @@ def fetch_category(client, category):
             parsed = json.loads(clean[start:end])
             items = parsed.get("items", [])
 
-            # Prefer grounding URLs when they match — grounding metadata has actual search results
-            if sources and items:
-                items = _correct_urls_from_grounding(items, sources)
+            # Use grounding_supports to get the actual URLs the model selected
+            if grounding and items:
+                supports = getattr(grounding, "grounding_supports", None) or []
+                if supports:
+                    items = _apply_grounding_support_urls(items, text, grounding)
+                elif sources:
+                    items = _correct_urls_from_grounding(items, sources)
 
             print(f"  [{category['id']}] Found {len(items)} items")
             return {"id": category["id"], "items": items, "sources": sources}
