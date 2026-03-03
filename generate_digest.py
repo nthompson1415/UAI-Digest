@@ -122,14 +122,29 @@ def _apply_chunk_indices_to_items(items, grounding_chunks):
     if not items or not grounding_chunks:
         return items
 
+    items_without_urls = []
+
     for item in items:
         chunk_idx = item.get("grounding_chunk_index")
+
+        # Handle missing index
         if chunk_idx is None:
+            items_without_urls.append(item.get("title", "Unknown"))
             continue
+
+        # Try to convert to int if it's a string
+        if isinstance(chunk_idx, str):
+            try:
+                chunk_idx = int(chunk_idx)
+            except (ValueError, TypeError):
+                print(f"    ⚠️  Non-integer chunk index '{chunk_idx}' for '{item.get('title', 'Unknown')}'")
+                items_without_urls.append(item.get("title", "Unknown"))
+                continue
 
         # Validate index is within bounds
         if not isinstance(chunk_idx, int) or chunk_idx < 0 or chunk_idx >= len(grounding_chunks):
-            print(f"    ⚠️  Invalid chunk index {chunk_idx} for item '{item.get('title', 'Unknown')}'")
+            print(f"    ⚠️  Out-of-bounds chunk index {chunk_idx} (valid: 0-{len(grounding_chunks)-1}) for '{item.get('title', 'Unknown')}'")
+            items_without_urls.append(item.get("title", "Unknown"))
             continue
 
         chunk = grounding_chunks[chunk_idx]
@@ -141,9 +156,14 @@ def _apply_chunk_indices_to_items(items, grounding_chunks):
             # Update source_name if empty
             if not item.get("source_name") and name:
                 item["source_name"] = name
-            print(f"    URL from chunk[{chunk_idx}]: {_domain(url)}")
+            print(f"    ✓ URL from chunk[{chunk_idx}]: {_domain(url)}")
         else:
             print(f"    ⚠️  Chunk[{chunk_idx}] has no URL")
+            items_without_urls.append(item.get("title", "Unknown"))
+
+    # Warn if any items ended up without URLs
+    if items_without_urls:
+        print(f"    ⚠️  {len(items_without_urls)} items missing URLs: {', '.join(items_without_urls[:3])}")
 
     return items
 
@@ -286,7 +306,15 @@ def fetch_category(client, category):
             elif items:
                 print(f"  [{category['id']}] ⚠️  Items present but no grounding chunks to map URLs")
 
-            print(f"  [{category['id']}] Found {len(items)} items")
+            # Validation: items must have source_url
+            items_with_urls = [item for item in items if item.get("source_url")]
+            items_without_urls = [item for item in items if not item.get("source_url")]
+
+            if items_without_urls:
+                print(f"  [{category['id']}] ⚠️  Filtering {len(items_without_urls)} items without URLs")
+                items = items_with_urls
+
+            print(f"  [{category['id']}] Found {len(items)} valid items")
             return {"id": category["id"], "items": items, "sources": sources}
         else:
             print(f"  [{category['id']}] No JSON found in response")
