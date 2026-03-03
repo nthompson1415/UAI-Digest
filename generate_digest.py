@@ -10,10 +10,13 @@ Free tier: 15 RPM, 1M tokens/day on gemini-2.0-flash
 """
 
 import os
+import re
 import json
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urljoin
+import requests
 from google import genai
 from google.genai.types import Tool, GenerateContentConfig, GoogleSearch
 
@@ -22,6 +25,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 MODEL_ID = "models/gemini-2.5-flash-lite"
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL", "")
 OUTPUT_DIR = os.environ.get("OUTPUT_DIR", "digests")
+RESOLVE_CANONICAL = os.environ.get("RESOLVE_CANONICAL_URLS", "true").lower() in ("1", "true", "yes")
 
 # Paywalled sources to exclude
 PAYWALLED = [
@@ -175,8 +179,65 @@ def _correct_urls_from_grounding(items, grounding_sources):
         if best_match and best_match != item_url and best_score >= 1.0:
             if _domain(item_url) != _domain(best_match):
                 item["source_url"] = best_match
+                print(f"    URL corrected: {_domain(item_url)} -> {_domain(best_match)}")
 
     return items
+
+
+# ── Canonical URL extraction ────────────────────────────────────────
+CANONICAL_RE = re.compile(
+    r'<link[^>]*\srel\s*=\s*["\']canonical["\'][^>]*\shref\s*=\s*["\']([^"\']+)["\']',
+    re.I
+)
+CANONICAL_RE_ALT = re.compile(
+    r'<link[^>]*\shref\s*=\s*["\']([^"\']+)["\'][^>]*\srel\s*=\s*["\']canonical["\']',
+    re.I
+)
+
+
+def _get_canonical_url(url, timeout=3):
+    """
+    Fetch page and extract canonical URL if present.
+    Many syndicated pages have <link rel="canonical" href="..."> pointing to the original.
+    """
+    if not url or not url.startswith(("http://", "https://")):
+        return url
+    try:
+        resp = requests.get(
+            url,
+            timeout=timeout,
+            headers={"User-Agent": "Mozilla/5.0 (compatible; UAI-Digest/1.0)"},
+            allow_redirects=True,
+        )
+        if resp.status_code != 200:
+            return url
+        html = resp.text[:100000]  # Limit parse size
+        m = CANONICAL_RE.search(html) or CANONICAL_RE_ALT.search(html)
+        if m:
+            canonical = m.group(1).strip()
+            if canonical:
+                canonical = urljoin(url, canonical)
+                if canonical != url:
+                    return canonical
+    except Exception:
+        pass
+    return url
+
+
+def _resolve_canonical_urls(items, max_workers=5):
+    """Resolve canonical URLs for all items in parallel."""
+    def resolve_one(item):
+        url = item.get("source_url", "")
+        if url:
+            canonical = _get_canonical_url(url)
+            if canonical != url:
+                item["source_url"] = canonical
+                print(f"    Canonical: {_domain(url)} -> {_domain(canonical)}")
+                return True
+        return False
+
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        list(ex.map(resolve_one, items))
 
 
 # ── Gemini Client ───────────────────────────────────────────────────
@@ -349,8 +410,6 @@ def send_discord(content):
         print("No DISCORD_WEBHOOK_URL set, skipping Discord post")
         return
 
-    import requests
-
     # Discord has 2000 char limit per message
     chunks = []
     current = ""
@@ -392,9 +451,22 @@ def main():
         result = fetch_category(client, cat)
         results[cat["id"]] = result
 
-        # Respect free tier rate limits (15 RPM)
+        # Rate limit: 5 req/min — after first 5, wait 60s before continuing
         if i < len(CATEGORIES) - 1:
-            time.sleep(5)
+            if (i + 1) % 5 == 0:
+                print("  Rate limit: waiting 60s...")
+                time.sleep(60)
+            else:
+                time.sleep(5)
+
+    # Resolve canonical URLs (fixes syndication — e.g. female-entrepreneurs.com -> blog.mean.ceo)
+    if RESOLVE_CANONICAL:
+        all_items = []
+        for cat_data in results.values():
+            all_items.extend(cat_data.get("items", []))
+        if all_items:
+            print("\nResolving canonical URLs...")
+            _resolve_canonical_urls(all_items)
 
     # Generate markdown
     digest_md = format_digest(results)
