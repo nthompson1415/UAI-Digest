@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>UAI Weekly AI Digest</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
+  <style>
+    :root {
+      --bg-primary: #060608;
+      --bg-secondary: #0c0c10;
+      --bg-card: rgba(255,255,255,0.02);
+      --bg-card-hover: rgba(0,255,65,0.03);
+      --green: #00ff41;
+      --green-dim: rgba(0,255,65,0.5);
+      --green-glow: rgba(0,255,65,0.12);
+      --text-primary: #e0e0e0;
+      --text-secondary: #888;
+      --text-muted: #444;
+      --border: rgba(255,255,255,0.06);
+      --border-green: rgba(0,255,65,0.2);
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: 'Outfit', sans-serif;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Scanline overlay */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9999;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent, transparent 2px,
+        rgba(0,255,65,0.012) 2px,
+        rgba(0,255,65,0.012) 4px
+      );
+    }
+
+    /* Grain texture */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 9998;
+      opacity: 0.03;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+    }
+
+    .container {
+      max-width: 780px;
+      margin: 0 auto;
+      padding: 40px 24px 80px;
+      position: relative;
+    }
+
+    /* ── Header ── */
+    .header {
+      text-align: center;
+      padding: 60px 0 40px;
+      animation: fadeDown 0.6s ease;
+    }
+
+    .header__signal {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--green);
+      letter-spacing: 6px;
+      opacity: 0.5;
+      margin-bottom: 24px;
+    }
+
+    .header__title {
+      font-family: 'Outfit', sans-serif;
+      font-size: clamp(36px, 8vw, 56px);
+      font-weight: 700;
+      color: #fff;
+      letter-spacing: -2px;
+      line-height: 1;
+      margin-bottom: 10px;
+    }
+
+    .header__subtitle {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: var(--green);
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .header__byline {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin-bottom: 28px;
+    }
+
+    .header__date {
+      display: inline-block;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text-secondary);
+      padding: 6px 18px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+    }
+
+    .header__divider {
+      width: 60px;
+      height: 1px;
+      background: var(--green);
+      opacity: 0.3;
+      margin: 32px auto 0;
+    }
+
+    /* ── Loading ── */
+    .loading {
+      text-align: center;
+      padding: 80px 0;
+      animation: pulse 1.5s ease infinite;
+    }
+
+    .loading__icon {
+      font-size: 32px;
+      margin-bottom: 16px;
+      opacity: 0.3;
+    }
+
+    .loading__text {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--green-dim);
+      letter-spacing: 3px;
+    }
+
+    /* ── Error ── */
+    .error {
+      text-align: center;
+      padding: 60px 20px;
+      border: 1px solid rgba(255,65,65,0.15);
+      border-radius: 6px;
+      background: rgba(255,65,65,0.03);
+    }
+
+    .error__title {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      color: #ff6b6b;
+      letter-spacing: 2px;
+      margin-bottom: 12px;
+    }
+
+    .error__detail {
+      font-size: 14px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    .error__detail a {
+      color: var(--green);
+    }
+
+    /* ── Digest Content ── */
+    .digest {
+      animation: fadeUp 0.5s ease;
+    }
+
+    .digest h2 {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--green);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      padding: 16px 0 12px;
+      border-bottom: 1px solid var(--border);
+      margin-top: 36px;
+      margin-bottom: 16px;
+    }
+
+    .digest h3 {
+      display: none; /* Hide the "Brought To You" h3, it's in the header */
+    }
+
+    /* First h1 and first few elements are the header — hide them since we have our own */
+    .digest > h1:first-child,
+    .digest > h3:first-of-type,
+    .digest > p:first-of-type,
+    .digest > hr:first-of-type {
+      display: none;
+    }
+
+    .digest p {
+      font-size: 15px;
+      line-height: 1.7;
+      color: var(--text-secondary);
+      margin-bottom: 6px;
+    }
+
+    .digest p strong {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+
+    .digest p a {
+      color: var(--green);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(0,255,65,0.25);
+      padding-bottom: 1px;
+      transition: border-color 0.2s ease;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+    }
+
+    .digest p a:hover {
+      border-color: var(--green);
+    }
+
+    /* Each news item block styling */
+    .digest p:has(strong) {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 14px 16px 4px;
+      margin-bottom: 0;
+      margin-top: 10px;
+      transition: all 0.2s ease;
+    }
+
+    .digest p:has(strong):hover {
+      background: var(--bg-card-hover);
+      border-color: var(--border-green);
+    }
+
+    .digest p:has(strong) + p {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-top: none;
+      border-radius: 0;
+      padding: 0 16px 4px;
+      margin-bottom: 0;
+    }
+
+    .digest p:has(strong) + p + p {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-top: none;
+      border-radius: 0 0 4px 4px;
+      padding: 0 16px 14px;
+      margin-bottom: 0;
+    }
+
+    .digest hr {
+      border: none;
+      height: 1px;
+      background: var(--border);
+      margin: 24px 0;
+    }
+
+    .digest em {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-style: normal;
+    }
+
+    .digest ol, .digest ul {
+      padding-left: 0;
+      list-style: none;
+    }
+
+    .digest ol li, .digest ul li {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      color: var(--text-secondary);
+      padding: 4px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.03);
+    }
+
+    .digest ol li a, .digest ul li a {
+      color: var(--green);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(0,255,65,0.2);
+    }
+
+    /* ── Footer ── */
+    .footer {
+      text-align: center;
+      padding: 40px 0 20px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: var(--text-muted);
+      letter-spacing: 1px;
+      line-height: 2.2;
+      border-top: 1px solid var(--border);
+      margin-top: 40px;
+    }
+
+    /* ── Animations ── */
+    @keyframes fadeDown {
+      from { opacity: 0; transform: translateY(-12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: var(--bg-primary); }
+    ::-webkit-scrollbar-thumb { background: #1a2a1a; border-radius: 3px; }
+
+    /* ── Mobile ── */
+    @media (max-width: 600px) {
+      .container { padding: 20px 16px 60px; }
+      .header { padding: 40px 0 28px; }
+      .header__signal { font-size: 9px; letter-spacing: 4px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <div class="header__signal">▍▍▍ INCOMING TRANSMISSION ▍▍▍</div>
+      <h1 class="header__title">UAI WEEKLY</h1>
+      <div class="header__subtitle">AI Digest</div>
+      <div class="header__byline">Brought To You By The Foundry</div>
+      <div class="header__date" id="dateRange">Loading...</div>
+      <div class="header__divider"></div>
+    </header>
+
+    <main id="content">
+      <div class="loading">
+        <div class="loading__icon">◈</div>
+        <div class="loading__text">LOADING DIGEST...</div>
+      </div>
+    </main>
+
+    <footer class="footer" id="footer" style="display:none;">
+      ALL CONTENT SOURCED FROM FREELY ACCESSIBLE PUBLICATIONS<br>
+      UAI × THE FOUNDRY
+    </footer>
+  </div>
+
+  <script>
+    async function loadDigest() {
+      const contentEl = document.getElementById('content');
+      const footerEl = document.getElementById('footer');
+      const dateEl = document.getElementById('dateRange');
+
+      try {
+        // Try fetching the latest digest markdown
+        const resp = await fetch('digests/latest.md');
+
+        if (!resp.ok) {
+          throw new Error(`HTTP ${resp.status}`);
+        }
+
+        const md = await resp.text();
+
+        // Extract date range from the markdown (the bold line like **Feb 18 – Mar 3, 2026**)
+        const dateMatch = md.match(/\*\*(.+?)\*\*/);
+        if (dateMatch) {
+          dateEl.textContent = dateMatch[1];
+        } else {
+          dateEl.textContent = new Date().toLocaleDateString('en-US', {
+            month: 'short', day: 'numeric', year: 'numeric'
+          });
+        }
+
+        // Parse markdown to HTML
+        const html = marked.parse(md);
+        contentEl.innerHTML = `<div class="digest">${html}</div>`;
+        footerEl.style.display = 'block';
+
+      } catch (err) {
+        contentEl.innerHTML = `
+          <div class="error">
+            <div class="error__title">NO DIGEST AVAILABLE YET</div>
+            <div class="error__detail">
+              The weekly digest hasn't been generated yet.<br>
+              It runs automatically every Monday at 9:00 AM EST.<br><br>
+              You can also trigger it manually from the
+              <a href="https://github.com/nthompson1415/UAI-Digest/actions" target="_blank">Actions tab</a>.
+            </div>
+          </div>
+        `;
+        dateEl.textContent = 'Awaiting first run';
+      }
+    }
+
+    loadDigest();
+  </script>
+</body>
+</html>
