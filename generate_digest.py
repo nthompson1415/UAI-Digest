@@ -13,6 +13,7 @@ import os
 import json
 import time
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
 from google import genai
 from google.genai.types import Tool, GenerateContentConfig, GoogleSearch
 
@@ -96,12 +97,86 @@ RULES:
 3. Only include items from the past 14 days.
 4. Each summary should be 2-3 sentences in plain language. Avoid jargon — if you must use a technical term, briefly explain it.
 5. Be specific. Include names, numbers, dates.
-6. Include the source URL for each item.
+6. CRITICAL — Source URL accuracy:
+   - source_url MUST be the EXACT URL of the article you summarized.
+   - Use the CANONICAL or PRIMARY URL (where the content originated), not syndicated copies.
+   - If the same article appears on multiple sites, cite the original publisher (e.g. blog.domain.com over syndication partners).
+   - source_name should match the site/publication at that URL.
+   - Verify each URL leads to the article you described — do not mix up similar articles.
 
 Return this exact JSON structure:
 {{"items": [{{"title": "Short headline", "summary": "2-3 sentence accessible summary", "source_name": "Publication name", "source_url": "Full URL", "date": "YYYY-MM-DD"}}]}}
 
 Return up to 5 items ranked by significance. If nothing notable happened, return {{"items": []}}."""
+
+
+# ── URL correction from grounding ────────────────────────────────────
+def _domain(url):
+    """Extract domain from URL for comparison."""
+    if not url:
+        return ""
+    try:
+        parsed = urlparse(url)
+        host = parsed.netloc or parsed.path
+        return host.lower().replace("www.", "")
+    except Exception:
+        return ""
+
+
+def _normalize_for_match(s):
+    """Lowercase, strip, keep alphanumeric and spaces for fuzzy matching."""
+    return "".join(c for c in s.lower() if c.isalnum() or c.isspace())
+
+
+def _correct_urls_from_grounding(items, grounding_sources):
+    """
+    When grounding metadata is available, prefer grounding URLs over Gemini's
+    stated URLs. Grounding URLs come from actual search results and are often
+    more accurate (canonical vs syndicated).
+    """
+    if not grounding_sources:
+        return items
+
+    for item in items:
+        item_title = _normalize_for_match(item.get("title", ""))
+        item_source = _normalize_for_match(item.get("source_name", ""))
+        item_url = item.get("source_url", "")
+
+        best_match = None
+        best_score = 0
+
+        for g in grounding_sources:
+            g_title = _normalize_for_match(g.get("title", ""))
+            g_url = g.get("url", "")
+
+            if not g_url or not g_title:
+                continue
+
+            # Score: title overlap, shared keywords (ai, model, 2026, etc.)
+            score = 0
+            title_words = set(w for w in item_title.split() if len(w) > 2)
+            g_words = set(g_title.split())
+            overlap = len(title_words & g_words) / max(len(title_words), 1)
+            score += overlap * 2
+
+            # Bonus for domain/site name in grounding (e.g. "mean" "ceo")
+            if item_source and item_source in g_title:
+                score += 1
+            # Bonus for key terms like "march", "2026", "model" in both
+            key_terms = {"ai", "model", "2026", "2025", "march", "february", "release"}
+            shared = (title_words | set(item_source.split())) & g_words & key_terms
+            score += len(shared) * 0.3
+
+            if score > best_score and score >= 0.5:
+                best_score = score
+                best_match = g_url
+
+        # Only replace when switching domain (syndication fix) and match is strong
+        if best_match and best_match != item_url and best_score >= 1.0:
+            if _domain(item_url) != _domain(best_match):
+                item["source_url"] = best_match
+
+    return items
 
 
 # ── Gemini Client ───────────────────────────────────────────────────
@@ -159,6 +234,11 @@ def fetch_category(client, category):
         if start >= 0 and end > start:
             parsed = json.loads(clean[start:end])
             items = parsed.get("items", [])
+
+            # Prefer grounding URLs when they match — grounding metadata has actual search results
+            if sources and items:
+                items = _correct_urls_from_grounding(items, sources)
+
             print(f"  [{category['id']}] Found {len(items)} items")
             return {"id": category["id"], "items": items, "sources": sources}
         else:

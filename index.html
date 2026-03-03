@@ -269,6 +269,16 @@
       margin: 16px 0;
     }
 
+    .digest--sources {
+      margin-top: 40px;
+      padding-top: 24px;
+      border-top: 1px solid var(--border);
+    }
+
+    .digest--sources h2 {
+      margin-top: 0;
+    }
+
     /* ── Digest Content ── */
     .digest {
       animation: fadeUp 0.5s ease;
@@ -462,10 +472,21 @@
     const PREVIEW_ITEMS = 3;
     const HEADLINE_MAX_LEN = 72;
 
+    function parseMarkdownWithCitations(md) {
+      const html = marked.parse(md);
+      const div = document.createElement('div');
+      div.innerHTML = html;
+      div.querySelectorAll('a[href^="http"]').forEach(a => {
+        a.setAttribute('target', '_blank');
+        a.setAttribute('rel', 'noopener noreferrer');
+      });
+      return div.innerHTML;
+    }
+
     function parseDigest(md) {
       const categories = [];
+      let sourcesSection = null;
       const sections = md.split(/\n## (?=[^\n])/);
-      const skipSections = ['All Sources Cited', '📚'];
 
       for (const section of sections) {
         const lines = section.trim().split('\n');
@@ -473,7 +494,11 @@
 
         const headerLine = lines[0];
         const title = headerLine.replace(/^#+\s*/, '').trim();
-        if (skipSections.some(s => title.includes(s))) continue;
+
+        if (title.includes('All Sources Cited') || title.includes('📚')) {
+          sourcesSection = '## ' + section.trim();
+          continue;
+        }
         if (title.includes('UAI WEEKLY') || title.includes('Brought To You')) continue;
 
         const headlines = [];
@@ -491,7 +516,7 @@
         categories.push({ title, headlines, fullMarkdown });
       }
 
-      return categories;
+      return { categories, sourcesSection };
     }
 
     function truncate(str, len) {
@@ -514,7 +539,7 @@
         .map(h => `<div class="category-card__preview-item">${escapeHtml(truncate(h, HEADLINE_MAX_LEN))}</div>`)
         .join('') + (moreCount > 0 ? `<div class="category-card__preview-item" style="opacity:0.6">+${moreCount} more</div>` : '');
 
-      const expandHtml = marked.parse(cat.fullMarkdown);
+      const expandHtml = parseMarkdownWithCitations(cat.fullMarkdown);
 
       return `
         <div class="category-card" data-index="${index}">
@@ -541,14 +566,18 @@
         const dateMatch = md.match(/\*\*(.+?)\*\*/);
         dateEl.textContent = dateMatch ? dateMatch[1] : new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-        const categories = parseDigest(md);
+        const { categories, sourcesSection } = parseDigest(md);
         const cardsHtml = categories.map((c, i) => renderCategoryCard(c, i)).join('');
-        contentEl.innerHTML = `<div class="category-grid">${cardsHtml}</div>`;
+        const sourcesHtml = sourcesSection
+          ? `<div class="digest digest--sources">${parseMarkdownWithCitations(sourcesSection)}</div>`
+          : '';
+        contentEl.innerHTML = `<div class="category-grid">${cardsHtml}</div>${sourcesHtml}`;
         footerEl.style.display = 'block';
 
         contentEl.querySelectorAll('.category-card').forEach(card => {
           card.addEventListener('click', (e) => {
             if (e.target.closest('a')) return;
+            if (e.target.closest('.category-card__expand')) return;
             const wasExpanded = card.classList.contains('is-expanded');
             contentEl.querySelectorAll('.category-card').forEach(c => c.classList.remove('is-expanded'));
             if (!wasExpanded) card.classList.add('is-expanded');
