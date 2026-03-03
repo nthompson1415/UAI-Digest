@@ -371,8 +371,10 @@
       const dateEl = document.getElementById('dateRange');
 
       try {
-        // Try fetching the latest digest markdown
-        const resp = await fetch('digests/latest.md');
+        // Use base path so fetch works with or without trailing slash in URL
+        // (e.g. /UAI-Digest vs /UAI-Digest/)
+        const base = document.location.pathname.replace(/\/?$/, '/');
+        const resp = await fetch(base + 'digests/latest.md');
 
         if (!resp.ok) {
           throw new Error(`HTTP ${resp.status}`);
