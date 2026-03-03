@@ -101,17 +101,51 @@ RULES:
 3. Only include items from the past 14 days.
 4. Each summary should be 2-3 sentences in plain language. Avoid jargon — if you must use a technical term, briefly explain it.
 5. Be specific. Include names, numbers, dates.
-6. CRITICAL — Source URL accuracy:
-   - source_url MUST be the EXACT URL of the article you summarized.
-   - Use the CANONICAL or PRIMARY URL (where the content originated), not syndicated copies.
-   - If the same article appears on multiple sites, cite the original publisher (e.g. blog.domain.com over syndication partners).
-   - source_name should match the site/publication at that URL.
-   - Verify each URL leads to the article you described — do not mix up similar articles.
+6. CRITICAL — Source accuracy:
+   - For EACH item, include grounding_chunk_index: the index (0-based) of the search result chunk that supports this item.
+   - This MUST be a valid index from the search results returned to you.
+   - source_name should be the publication/site from that search result.
+   - Do NOT make up URLs or cite sources not in your search results.
 
 Return this exact JSON structure:
-{{"items": [{{"title": "Short headline", "summary": "2-3 sentence accessible summary", "source_name": "Publication name", "source_url": "Full URL", "date": "YYYY-MM-DD"}}]}}
+{{"items": [{{"title": "Short headline", "summary": "2-3 sentence accessible summary", "source_name": "Publication name", "grounding_chunk_index": 0, "date": "YYYY-MM-DD"}}]}}
 
 Return up to 5 items ranked by significance. If nothing notable happened, return {{"items": []}}."""
+
+
+# ── Chunk index to URL mapping ──────────────────────────────────────
+def _apply_chunk_indices_to_items(items, grounding_chunks):
+    """
+    Map grounding_chunk_index values in items to actual URLs from grounding_chunks.
+    This eliminates URL guessing — we use ONLY the URLs from actual search results.
+    """
+    if not items or not grounding_chunks:
+        return items
+
+    for item in items:
+        chunk_idx = item.get("grounding_chunk_index")
+        if chunk_idx is None:
+            continue
+
+        # Validate index is within bounds
+        if not isinstance(chunk_idx, int) or chunk_idx < 0 or chunk_idx >= len(grounding_chunks):
+            print(f"    ⚠️  Invalid chunk index {chunk_idx} for item '{item.get('title', 'Unknown')}'")
+            continue
+
+        chunk = grounding_chunks[chunk_idx]
+        url = chunk.get("url", "")
+        name = chunk.get("title", "")
+
+        if url:
+            item["source_url"] = url
+            # Update source_name if empty
+            if not item.get("source_name") and name:
+                item["source_name"] = name
+            print(f"    URL from chunk[{chunk_idx}]: {_domain(url)}")
+        else:
+            print(f"    ⚠️  Chunk[{chunk_idx}] has no URL")
+
+    return items
 
 
 # ── URL correction from grounding ────────────────────────────────────
@@ -127,139 +161,6 @@ def _domain(url):
         return ""
 
 
-def _normalize_for_match(s):
-    """Lowercase, strip, keep alphanumeric and spaces for fuzzy matching."""
-    return "".join(c for c in s.lower() if c.isalnum() or c.isspace())
-
-
-def _apply_grounding_support_urls(items, full_text, grounding):
-    """
-    Use grounding_supports to map each digest item to the actual URLs the model
-    selected from search results. The API exposes which grounding chunks support
-    which segments of the response — we use that instead of the LLM-generated URLs.
-    """
-    if not grounding or not items:
-        return items
-
-    try:
-        chunks = getattr(grounding, "grounding_chunks", None) or []
-        supports = getattr(grounding, "grounding_supports", None) or []
-    except Exception:
-        return items
-
-    if not chunks or not supports:
-        return items
-
-    # Build chunk URL list (only web chunks have URLs)
-    chunk_urls = []
-    for chunk in chunks:
-        url = ""
-        if hasattr(chunk, "web") and chunk.web:
-            url = getattr(chunk.web, "uri", "") or ""
-        chunk_urls.append(url)
-
-    # Search from this position so duplicate titles map to correct items in order
-    search_start = 0
-
-    for item in items:
-        title = item.get("title", "")
-        if not title:
-            continue
-
-        # Find where this title appears (advance search_start so duplicates map correctly)
-        # Try literal first; fallback to JSON-encoded form for titles with " or \
-        search_str = title
-        pos = full_text.find(search_str, search_start)
-        if pos < 0 and ('"' in title or '\\' in title):
-            try:
-                search_str = json.dumps(title)[1:-1]  # Inner content without outer quotes
-                pos = full_text.find(search_str, search_start)
-            except Exception:
-                pass
-        if pos < 0:
-            continue
-        search_start = pos + len(search_str)
-
-        item_start, item_end = pos, pos + len(search_str)
-
-        # Find which grounding support segment overlaps with this position
-        best_url = None
-        best_overlap = 0
-
-        for support in supports:
-            segment = getattr(support, "segment", None)
-            if not segment:
-                continue
-            start = getattr(segment, "start_index", None) or getattr(segment, "startIndex", 0) or 0
-            end = getattr(segment, "end_index", None) or getattr(segment, "endIndex", 0) or 0
-
-            # Check overlap (segment supports this part of the response)
-            overlap_start = max(item_start, start)
-            overlap_end = min(item_end, end)
-            if overlap_end > overlap_start:
-                overlap = overlap_end - overlap_start
-                if overlap > best_overlap:
-                    indices = getattr(support, "grounding_chunk_indices", None) or getattr(support, "groundingChunkIndices", []) or []
-                    if indices:
-                        chunk_idx = indices[0]
-                        if 0 <= chunk_idx < len(chunk_urls) and chunk_urls[chunk_idx]:
-                            best_overlap = overlap
-                            best_url = chunk_urls[chunk_idx]
-
-        if best_url:
-            old_url = item.get("source_url", "")
-            if best_url != old_url:
-                item["source_url"] = best_url
-                print(f"    URL from grounding: {_domain(old_url)} -> {_domain(best_url)}")
-
-    return items
-
-
-def _correct_urls_from_grounding(items, grounding_sources):
-    """
-    Fallback: when grounding_supports is unavailable, use fuzzy matching against
-    grounding_chunks. Less reliable than segment-based mapping.
-    """
-    if not grounding_sources:
-        return items
-
-    for item in items:
-        item_title = _normalize_for_match(item.get("title", ""))
-        item_source = _normalize_for_match(item.get("source_name", ""))
-        item_url = item.get("source_url", "")
-
-        best_match = None
-        best_score = 0
-
-        for g in grounding_sources:
-            g_title = _normalize_for_match(g.get("title", ""))
-            g_url = g.get("url", "")
-
-            if not g_url or not g_title:
-                continue
-
-            score = 0
-            title_words = set(w for w in item_title.split() if len(w) > 2)
-            g_words = set(g_title.split())
-            overlap = len(title_words & g_words) / max(len(title_words), 1)
-            score += overlap * 2
-
-            if item_source and item_source in g_title:
-                score += 1
-            key_terms = {"ai", "model", "2026", "2025", "march", "february", "release"}
-            shared = (title_words | set(item_source.split())) & g_words & key_terms
-            score += len(shared) * 0.3
-
-            if score > best_score and score >= 0.5:
-                best_score = score
-                best_match = g_url
-
-        if best_match and best_match != item_url and best_score >= 1.0:
-            if _domain(item_url) != _domain(best_match):
-                item["source_url"] = best_match
-                print(f"    URL corrected (fallback): {_domain(item_url)} -> {_domain(best_match)}")
-
-    return items
 
 
 # ── Canonical URL extraction ────────────────────────────────────────
@@ -378,13 +279,12 @@ def fetch_category(client, category):
             parsed = json.loads(clean[start:end])
             items = parsed.get("items", [])
 
-            # Use grounding_supports to get the actual URLs the model selected
-            if grounding and items:
-                supports = getattr(grounding, "grounding_supports", None) or []
-                if supports:
-                    items = _apply_grounding_support_urls(items, text, grounding)
-                elif sources:
-                    items = _correct_urls_from_grounding(items, sources)
+            # Map grounding_chunk_indices to actual URLs from search results
+            # This uses the indices Gemini returned, eliminating URL guessing
+            if items and sources:
+                items = _apply_chunk_indices_to_items(items, sources)
+            elif items:
+                print(f"  [{category['id']}] ⚠️  Items present but no grounding chunks to map URLs")
 
             print(f"  [{category['id']}] Found {len(items)} items")
             return {"id": category["id"], "items": items, "sources": sources}
