@@ -9,18 +9,18 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.1/marked.min.js"></script>
   <style>
     :root {
-      --bg-primary: #060608;
-      --bg-secondary: #0c0c10;
-      --bg-card: rgba(255,255,255,0.02);
-      --bg-card-hover: rgba(0,255,65,0.03);
-      --green: #00ff41;
-      --green-dim: rgba(0,255,65,0.5);
-      --green-glow: rgba(0,255,65,0.12);
-      --text-primary: #e0e0e0;
-      --text-secondary: #888;
-      --text-muted: #444;
-      --border: rgba(255,255,255,0.06);
-      --border-green: rgba(0,255,65,0.2);
+      --bg-primary: #0a0a0d;
+      --bg-secondary: #12121a;
+      --bg-card: rgba(255,255,255,0.03);
+      --bg-card-hover: rgba(249,115,22,0.06);
+      --accent: #f97316;
+      --accent-dim: rgba(249,115,22,0.65);
+      --accent-glow: rgba(249,115,22,0.1);
+      --text-primary: #e8e8ec;
+      --text-secondary: #9ca3af;
+      --text-muted: #4b5563;
+      --border: rgba(255,255,255,0.08);
+      --border-accent: rgba(249,115,22,0.25);
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -33,19 +33,14 @@
       overflow-x: hidden;
     }
 
-    /* Scanline overlay */
+    /* Subtle gradient overlay — techy, not CRT */
     body::before {
       content: '';
       position: fixed;
       inset: 0;
       pointer-events: none;
       z-index: 9999;
-      background: repeating-linear-gradient(
-        0deg,
-        transparent, transparent 2px,
-        rgba(0,255,65,0.012) 2px,
-        rgba(0,255,65,0.012) 4px
-      );
+      background: radial-gradient(ellipse 80% 50% at 50% 0%, rgba(249,115,22,0.04) 0%, transparent 60%);
     }
 
     /* Grain texture */
@@ -76,7 +71,7 @@
     .header__signal {
       font-family: 'JetBrains Mono', monospace;
       font-size: 11px;
-      color: var(--green);
+      color: var(--accent);
       letter-spacing: 6px;
       opacity: 0.5;
       margin-bottom: 24px;
@@ -86,16 +81,26 @@
       font-family: 'Outfit', sans-serif;
       font-size: clamp(36px, 8vw, 56px);
       font-weight: 700;
-      color: #fff;
       letter-spacing: -2px;
       line-height: 1;
       margin-bottom: 10px;
+      background: linear-gradient(
+        90deg,
+        #fff 0%, #fff 40%,
+        var(--accent) 50%,
+        #fff 60%, #fff 100%
+      );
+      background-size: 200% auto;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      animation: shimmer 4s linear infinite;
     }
 
     .header__subtitle {
       font-family: 'JetBrains Mono', monospace;
       font-size: 13px;
-      color: var(--green);
+      color: var(--accent);
       letter-spacing: 4px;
       text-transform: uppercase;
       margin-bottom: 8px;
@@ -123,7 +128,7 @@
     .header__divider {
       width: 60px;
       height: 1px;
-      background: var(--green);
+      background: var(--accent);
       opacity: 0.3;
       margin: 32px auto 0;
     }
@@ -132,19 +137,32 @@
     .loading {
       text-align: center;
       padding: 80px 0;
-      animation: pulse 1.5s ease infinite;
     }
 
-    .loading__icon {
-      font-size: 32px;
-      margin-bottom: 16px;
-      opacity: 0.3;
+    .loading__dots {
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+      margin-bottom: 20px;
     }
+
+    .loading__dots span {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      opacity: 0;
+      animation: dotBlink 1.4s ease infinite;
+    }
+
+    .loading__dots span:nth-child(1) { animation-delay: 0s; }
+    .loading__dots span:nth-child(2) { animation-delay: 0.2s; }
+    .loading__dots span:nth-child(3) { animation-delay: 0.4s; }
 
     .loading__text {
       font-family: 'JetBrains Mono', monospace;
       font-size: 12px;
-      color: var(--green-dim);
+      color: var(--accent-dim);
       letter-spacing: 3px;
     }
 
@@ -172,7 +190,7 @@
     }
 
     .error__detail a {
-      color: var(--green);
+      color: var(--accent);
     }
 
     /* ── Category Cards (Homepage) ── */
@@ -188,25 +206,35 @@
       border-radius: 4px;
       padding: 16px 18px;
       cursor: pointer;
-      transition: all 0.2s ease;
+      transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
       text-align: left;
+      opacity: 0;
+    }
+
+    .category-card.is-visible {
+      opacity: 1;
+      animation: cardReveal 0.4s ease forwards;
     }
 
     .category-card:hover {
       background: var(--bg-card-hover);
-      border-color: var(--border-green);
+      border-color: var(--border-accent);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 24px rgba(249,115,22,0.08);
     }
 
     .category-card.is-expanded {
-      border-color: var(--border-green);
+      border-color: var(--border-accent);
       background: var(--bg-card-hover);
+      transform: none;
+      box-shadow: 0 0 0 1px rgba(249,115,22,0.1);
     }
 
     .category-card__header {
       font-family: 'JetBrains Mono', monospace;
       font-size: 12px;
       font-weight: 700;
-      color: var(--green);
+      color: var(--accent);
       letter-spacing: 2px;
       text-transform: uppercase;
       margin-bottom: 10px;
@@ -242,19 +270,30 @@
 
     .category-card__preview-item::before {
       content: '· ';
-      color: var(--green-dim);
+      color: var(--accent-dim);
     }
 
     .category-card__expand {
-      display: none;
-      margin-top: 16px;
-      padding-top: 16px;
-      border-top: 1px solid var(--border);
-      animation: fadeUp 0.3s ease;
+      display: grid;
+      grid-template-rows: 0fr;
+      transition: grid-template-rows 0.35s ease;
+      overflow: hidden;
+    }
+
+    .category-card__expand-inner {
+      overflow: hidden;
+      padding-top: 0;
+      transition: padding-top 0.35s ease;
     }
 
     .category-card.is-expanded .category-card__expand {
-      display: block;
+      grid-template-rows: 1fr;
+    }
+
+    .category-card.is-expanded .category-card__expand-inner {
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      margin-top: 16px;
     }
 
     .category-card__expand .digest {
@@ -279,21 +318,38 @@
       margin-top: 0;
     }
 
-    /* Show the "Note on flagged URLs" h3 (overrides .digest h3 { display: none }) */
+    /* Flagged sources note — callout box (overrides .digest h3 { display: none }) */
     .digest--sources h3 {
       display: block;
       font-family: 'JetBrains Mono', monospace;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--green-dim);
-      letter-spacing: 1px;
-      margin: 0 0 8px;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin: 0 0 10px;
+      padding: 12px 14px;
+      background: rgba(249,115,22,0.08);
+      border: 1px solid var(--border-accent);
+      border-radius: 4px;
     }
 
-    .digest--sources h3 + p {
-      margin-bottom: 12px;
+    .digest--sources h3 + p,
+    .digest--sources h3 + p + p {
+      margin: 0 0 8px;
+      padding: 0 14px 12px;
       font-size: 13px;
       color: var(--text-secondary);
+      line-height: 1.5;
+      background: rgba(249,115,22,0.08);
+      border: 1px solid var(--border-accent);
+      border-top: none;
+      border-radius: 0 0 4px 4px;
+    }
+
+    .digest--sources h3 + p + p {
+      margin-bottom: 20px;
+      padding-bottom: 14px;
     }
 
     /* ── Digest Content ── */
@@ -305,7 +361,7 @@
       font-family: 'JetBrains Mono', monospace;
       font-size: 13px;
       font-weight: 700;
-      color: var(--green);
+      color: var(--accent);
       letter-spacing: 2px;
       text-transform: uppercase;
       padding: 16px 0 12px;
@@ -339,9 +395,9 @@
     }
 
     .digest p a {
-      color: var(--green);
+      color: var(--accent);
       text-decoration: none;
-      border-bottom: 1px solid rgba(0,255,65,0.25);
+      border-bottom: 1px solid rgba(249,115,22,0.35);
       padding-bottom: 1px;
       transition: border-color 0.2s ease;
       font-family: 'JetBrains Mono', monospace;
@@ -349,7 +405,7 @@
     }
 
     .digest p a:hover {
-      border-color: var(--green);
+      border-color: var(--accent);
     }
 
     /* Each news item block styling */
@@ -365,7 +421,7 @@
 
     .digest p:has(strong):hover {
       background: var(--bg-card-hover);
-      border-color: var(--border-green);
+      border-color: var(--border-accent);
     }
 
     .digest p:has(strong) + p {
@@ -414,9 +470,9 @@
     }
 
     .digest ol li a, .digest ul li a {
-      color: var(--green);
+      color: var(--accent);
       text-decoration: none;
-      border-bottom: 1px solid rgba(0,255,65,0.2);
+      border-bottom: 1px solid rgba(249,115,22,0.25);
     }
 
     /* ── Footer ── */
@@ -448,10 +504,30 @@
       50% { opacity: 0.4; }
     }
 
+    @keyframes dotBlink {
+      0%, 80%, 100% { opacity: 0; }
+      40% { opacity: 1; }
+    }
+
+    @keyframes shimmer {
+      0% { background-position: -200% center; }
+      100% { background-position: 200% center; }
+    }
+
+    @keyframes scanline {
+      0% { transform: translateY(-100%); }
+      100% { transform: translateY(100vh); }
+    }
+
+    @keyframes cardReveal {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
     /* ── Scrollbar ── */
     ::-webkit-scrollbar { width: 5px; }
     ::-webkit-scrollbar-track { background: var(--bg-primary); }
-    ::-webkit-scrollbar-thumb { background: #1a2a1a; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb { background: #2a2520; border-radius: 3px; }
 
     /* ── Mobile ── */
     @media (max-width: 600px) {
@@ -464,7 +540,7 @@
 <body>
   <div class="container">
     <header class="header">
-      <div class="header__signal">▍▍▍ INCOMING TRANSMISSION ▍▍▍</div>
+      <div class="header__signal">WEEKLY AI BRIEF</div>
       <h1 class="header__title">UAI WEEKLY</h1>
       <div class="header__subtitle">AI Digest</div>
       <div class="header__byline">Brought to you by The Foundry</div>
@@ -474,8 +550,10 @@
 
     <main id="content">
       <div class="loading">
-        <div class="loading__icon">◈</div>
-        <div class="loading__text">LOADING DIGEST...</div>
+        <div class="loading__dots">
+          <span></span><span></span><span></span>
+        </div>
+        <div class="loading__text">LOADING DIGEST</div>
       </div>
     </main>
 
@@ -562,7 +640,11 @@
         <div class="category-card" data-index="${index}">
           <div class="category-card__header">${escapeHtml(cat.title)}</div>
           <div class="category-card__preview">${previewHtml}</div>
-          <div class="category-card__expand"><div class="digest">${expandHtml}</div></div>
+          <div class="category-card__expand">
+            <div class="category-card__expand-inner">
+              <div class="digest">${expandHtml}</div>
+            </div>
+          </div>
         </div>
       `;
     }
@@ -591,10 +673,24 @@
         contentEl.innerHTML = `<div class="category-grid">${cardsHtml}</div>${sourcesHtml}`;
         footerEl.style.display = 'block';
 
+        // Staggered card reveal via Intersection Observer
+        const observer = new IntersectionObserver((entries) => {
+          entries.forEach(entry => {
+            if (entry.isIntersecting) {
+              const card = entry.target;
+              const index = parseInt(card.dataset.index, 10);
+              setTimeout(() => card.classList.add('is-visible'), index * 80);
+              observer.unobserve(card);
+            }
+          });
+        }, { threshold: 0.1 });
+
         contentEl.querySelectorAll('.category-card').forEach(card => {
+          observer.observe(card);
+
           card.addEventListener('click', (e) => {
             if (e.target.closest('a')) return;
-            if (e.target.closest('.category-card__expand')) return;
+            if (e.target.closest('.category-card__expand-inner')) return;
             const wasExpanded = card.classList.contains('is-expanded');
             contentEl.querySelectorAll('.category-card').forEach(c => c.classList.remove('is-expanded'));
             if (!wasExpanded) card.classList.add('is-expanded');
