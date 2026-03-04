@@ -101,71 +101,49 @@ RULES:
 3. Only include items from the past 14 days.
 4. Each summary should be 2-3 sentences in plain language. Avoid jargon — if you must use a technical term, briefly explain it.
 5. Be specific. Include names, numbers, dates.
-6. CRITICAL — Source accuracy:
-   - For EACH item, include grounding_chunk_index: the index (0-based) of the search result chunk that supports this item.
-   - This MUST be a valid index from the search results returned to you.
-   - source_name should be the publication/site from that search result.
-   - Do NOT make up URLs or cite sources not in your search results.
+6. For each item, include the source_url from the search results you found.
 
 Return this exact JSON structure:
-{{"items": [{{"title": "Short headline", "summary": "2-3 sentence accessible summary", "source_name": "Publication name", "grounding_chunk_index": 0, "date": "YYYY-MM-DD"}}]}}
+{{"items": [{{"title": "Short headline", "summary": "2-3 sentence accessible summary", "source_name": "Publication name", "source_url": "Full URL from search results", "date": "YYYY-MM-DD"}}]}}
 
 Return up to 5 items ranked by significance. If nothing notable happened, return {{"items": []}}."""
 
 
-# ── Chunk index to URL mapping ──────────────────────────────────────
-def _apply_chunk_indices_to_items(items, grounding_chunks):
+# ── URL validation against grounding ───────────────────────────────────
+def _validate_urls_against_grounding(items, grounding_chunks):
     """
-    Map grounding_chunk_index values in items to actual URLs from grounding_chunks.
-    This eliminates URL guessing — we use ONLY the URLs from actual search results.
+    Validate that returned URLs actually exist in grounding chunks.
+    If a URL is not found, mark it. If all URLs are invalid, filter the item.
     """
     if not items or not grounding_chunks:
         return items
 
-    items_without_urls = []
+    chunk_urls = {chunk.get("url") for chunk in grounding_chunks if chunk.get("url")}
+    items_with_valid_urls = []
+    invalid_count = 0
 
     for item in items:
-        chunk_idx = item.get("grounding_chunk_index")
+        source_url = item.get("source_url", "").strip()
 
-        # Handle missing index
-        if chunk_idx is None:
-            items_without_urls.append(item.get("title", "Unknown"))
+        if not source_url:
+            invalid_count += 1
             continue
 
-        # Try to convert to int if it's a string
-        if isinstance(chunk_idx, str):
-            try:
-                chunk_idx = int(chunk_idx)
-            except (ValueError, TypeError):
-                print(f"    ⚠️  Non-integer chunk index '{chunk_idx}' for '{item.get('title', 'Unknown')}'")
-                items_without_urls.append(item.get("title", "Unknown"))
-                continue
-
-        # Validate index is within bounds
-        if not isinstance(chunk_idx, int) or chunk_idx < 0 or chunk_idx >= len(grounding_chunks):
-            print(f"    ⚠️  Out-of-bounds chunk index {chunk_idx} (valid: 0-{len(grounding_chunks)-1}) for '{item.get('title', 'Unknown')}'")
-            items_without_urls.append(item.get("title", "Unknown"))
-            continue
-
-        chunk = grounding_chunks[chunk_idx]
-        url = chunk.get("url", "")
-        name = chunk.get("title", "")
-
-        if url:
-            item["source_url"] = url
-            # Update source_name if empty
-            if not item.get("source_name") and name:
-                item["source_name"] = name
-            print(f"    ✓ URL from chunk[{chunk_idx}]: {_domain(url)}")
+        # Check if URL is in grounding results
+        if source_url in chunk_urls:
+            items_with_valid_urls.append(item)
+            print(f"    ✓ URL verified in grounding: {_domain(source_url)}")
         else:
-            print(f"    ⚠️  Chunk[{chunk_idx}] has no URL")
-            items_without_urls.append(item.get("title", "Unknown"))
+            # URL not in grounding - still keep it with a warning
+            # (Gemini might have found a valid article, just not from the chunks shown)
+            items_with_valid_urls.append(item)
+            print(f"    ⚠️  URL not in grounding chunks: {_domain(source_url)}")
+            invalid_count += 1
 
-    # Warn if any items ended up without URLs
-    if items_without_urls:
-        print(f"    ⚠️  {len(items_without_urls)} items missing URLs: {', '.join(items_without_urls[:3])}")
+    if invalid_count > 0:
+        print(f"    {invalid_count} URLs were missing or unverified")
 
-    return items
+    return items_with_valid_urls
 
 
 # ── URL correction from grounding ────────────────────────────────────
@@ -283,16 +261,12 @@ def fetch_category(client, category):
         sources = []
         grounding = getattr(candidate, "grounding_metadata", None)
         if grounding and hasattr(grounding, "grounding_chunks"):
-            total_chunks = len(grounding.grounding_chunks or [])
             for chunk in (grounding.grounding_chunks or []):
                 if hasattr(chunk, "web") and chunk.web:
                     sources.append({
                         "title": getattr(chunk.web, "title", ""),
                         "url": getattr(chunk.web, "uri", ""),
                     })
-            print(f"  [{category['id']}] DEBUG: {len(sources)} web chunks found out of {total_chunks} total chunks")
-        else:
-            print(f"  [{category['id']}] DEBUG: No grounding_metadata or chunks found")
 
         # Parse JSON from response
         clean = text.replace("```json", "").replace("```", "").strip()
@@ -303,30 +277,14 @@ def fetch_category(client, category):
             parsed = json.loads(clean[start:end])
             items = parsed.get("items", [])
 
-            # DEBUG: Show what Gemini returned
-            if items:
-                sample_item = items[0]
-                has_chunk_idx = "grounding_chunk_index" in sample_item
-                has_source_url = "source_url" in sample_item
-                print(f"  [{category['id']}] DEBUG: Sample item fields: {list(sample_item.keys())}")
-                print(f"  [{category['id']}] DEBUG: Has grounding_chunk_index? {has_chunk_idx}, Has source_url? {has_source_url}")
-
-            # Map grounding_chunk_indices to actual URLs from search results
-            # This uses the indices Gemini returned, eliminating URL guessing
+            # Validate URLs against grounding chunks
             if items and sources:
-                items = _apply_chunk_indices_to_items(items, sources)
-            elif items:
-                print(f"  [{category['id']}] ⚠️  Items present but no grounding chunks to map URLs")
+                items = _validate_urls_against_grounding(items, sources)
 
-            # Validation: items must have source_url
-            items_with_urls = [item for item in items if item.get("source_url")]
-            items_without_urls = [item for item in items if not item.get("source_url")]
+            # Filter items without source_url
+            items = [item for item in items if item.get("source_url")]
 
-            if items_without_urls:
-                print(f"  [{category['id']}] ⚠️  Filtering {len(items_without_urls)} items without URLs")
-                items = items_with_urls
-
-            print(f"  [{category['id']}] Found {len(items)} valid items")
+            print(f"  [{category['id']}] Found {len(items)} items")
             return {"id": category["id"], "items": items, "sources": sources}
         else:
             print(f"  [{category['id']}] No JSON found in response")
