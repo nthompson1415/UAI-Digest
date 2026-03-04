@@ -1,5 +1,5 @@
 # UAI Weekly AI Digest
-### Brought To You By The Foundry
+### Brought to you by The Foundry
 
 Automated weekly AI news digest powered by Google Gemini (free tier) with live Google Search grounding. Runs every Monday via GitHub Actions at zero cost.
 

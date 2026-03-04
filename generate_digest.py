@@ -1,6 +1,6 @@
 """
 UAI Weekly AI Digest Generator
-Brought To You By The Foundry
+Brought to you by The Foundry
 
 Uses Google Gemini API with Google Search grounding to generate
 a comprehensive weekly AI news digest across 8 categories.
@@ -321,7 +321,7 @@ def format_digest(results):
 
     lines = []
     lines.append("# UAI WEEKLY AI DIGEST")
-    lines.append("### Brought To You By The Foundry")
+    lines.append("### Brought to you by The Foundry")
     lines.append(f"**{date_range}**")
     lines.append("")
     lines.append("---")
@@ -397,7 +397,7 @@ def format_discord(results):
 
     lines = []
     lines.append(f"# UAI WEEKLY AI DIGEST")
-    lines.append(f"### Brought To You By The Foundry · {date_range}")
+    lines.append(f"### Brought to you by The Foundry · {date_range}")
     lines.append("")
 
     for cat in CATEGORIES:
@@ -451,7 +451,7 @@ def send_discord(content):
 def main():
     print("=" * 50)
     print("UAI WEEKLY AI DIGEST GENERATOR")
-    print("Brought To You By The Foundry")
+    print("Brought to you by The Foundry")
     print("=" * 50)
     print()
 
