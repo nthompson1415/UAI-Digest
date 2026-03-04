@@ -318,7 +318,37 @@
       margin-top: 0;
     }
 
-    /* Flagged sources note — callout box (overrides .digest h3 { display: none }) */
+    /* Flagged sources note — always shown, from index */
+    .sources-note {
+      padding: 12px 14px 14px;
+      margin-bottom: 20px;
+      background: rgba(249,115,22,0.08);
+      border: 1px solid var(--border-accent);
+      border-radius: 4px;
+    }
+
+    .sources-note h3 {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent);
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      margin: 0 0 8px;
+    }
+
+    .sources-note p {
+      margin: 0 0 6px;
+      font-size: 13px;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
+    .sources-note p:last-child {
+      margin-bottom: 0;
+    }
+
+    /* Flagged sources note from markdown — callout (overrides .digest h3 { display: none }) */
     .digest--sources h3 {
       display: block;
       font-family: 'JetBrains Mono', monospace;
@@ -661,8 +691,16 @@
 
         const { categories, sourcesSection } = parseDigest(md);
         const cardsHtml = categories.map((c, i) => renderCategoryCard(c, i)).join('');
+        const FLAGGED_SOURCES_NOTE = `
+          <div class="sources-note">
+            <h3>Note on flagged URLs (⚠️)</h3>
+            <p>Some URLs below are marked with ⚠️ because they couldn't be verified or may not work (e.g. long redirect links).</p>
+            <p>If a flagged link doesn't work, try searching the article title in Google—the original article is definitely out there!</p>
+          </div>`;
+        // Strip note from markdown to avoid duplicate (we inject it from index)
+        const sourcesMd = sourcesSection ? sourcesSection.replace(/### Note on flagged URLs \(⚠️\)\s*\n[\s\S]*?(?=\n\n\d+\. |\n\n---|\n\*Generated |$)/, '').replace(/\n{3,}/g, '\n\n').trim() : '';
         const sourcesHtml = sourcesSection
-          ? `<div class="digest digest--sources">${parseMarkdownWithCitations(sourcesSection)}</div>`
+          ? `<div class="digest digest--sources">${FLAGGED_SOURCES_NOTE}${parseMarkdownWithCitations(sourcesMd)}</div>`
           : '';
         contentEl.innerHTML = `<div class="category-grid">${cardsHtml}</div>${sourcesHtml}`;
         footerEl.style.display = 'block';
