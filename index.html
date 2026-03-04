@@ -279,6 +279,23 @@
       margin-top: 0;
     }
 
+    /* Show the "Note on flagged URLs" h3 (overrides .digest h3 { display: none }) */
+    .digest--sources h3 {
+      display: block;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--green-dim);
+      letter-spacing: 1px;
+      margin: 0 0 8px;
+    }
+
+    .digest--sources h3 + p {
+      margin-bottom: 12px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
     /* ── Digest Content ── */
     .digest {
       animation: fadeUp 0.5s ease;

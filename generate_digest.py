@@ -110,6 +110,19 @@ Return up to 5 items ranked by significance. If nothing notable happened, return
 
 
 # ── URL validation against grounding ───────────────────────────────────
+def _is_problematic_url(url):
+    """Flag URLs that are broken or not user-friendly (huge redirects, API links)."""
+    if not url:
+        return True
+    # Vertex AI grounding redirect URLs - don't work for end users
+    if "vertexaisearch.cloud.google.com/grounding-api-redirect" in url:
+        return True
+    # Excessively long URLs often broken or redirects
+    if len(url) > 250:
+        return True
+    return False
+
+
 def _validate_urls_against_grounding(items, grounding_chunks):
     """
     Validate URLs against grounding chunks and mark unverified ones with a flag.
@@ -131,6 +144,12 @@ def _validate_urls_against_grounding(items, grounding_chunks):
             flagged_count += 1
             continue
 
+        # Flag problematic URLs (huge, redirect, API links) even if in grounding
+        if _is_problematic_url(source_url):
+            item["_url_flagged"] = True
+            flagged_count += 1
+            print(f"    ⚠️  URL flagged (problematic): {_domain(source_url)}")
+            continue
         # Check if URL is in grounding results
         if source_url in chunk_urls:
             item["_url_flagged"] = False
@@ -325,6 +344,9 @@ def format_digest(results):
             title = item.get("title", "Untitled")
             summary = item.get("summary", "")
             source_name = item.get("source_name", "Source")
+            # Don't use "image" as link text - often from image search, confusing
+            if (source_name or "").lower().strip() == "image":
+                source_name = "Source"
             source_url = item.get("source_url", "")
             date = item.get("date", "")
             is_flagged = item.get("_url_flagged", False)
@@ -344,23 +366,19 @@ def format_digest(results):
     if all_sources:
         lines.append("## 📚 All Sources Cited")
         lines.append("")
+        has_flagged = any(s.get("flagged") for s in all_sources)
+        if has_flagged:
+            lines.append("### Note on flagged URLs (⚠️)")
+            lines.append("Some URLs below are marked with ⚠️ because they couldn't be verified or may not work (e.g. long redirect links).")
+            lines.append("If a flagged link doesn't work, try searching the article title in Google—the original article is definitely out there!")
+            lines.append("")
         seen = set()
-        flagged_urls = []
         for i, s in enumerate(all_sources, 1):
             if s["url"] not in seen:
                 flag_indicator = " ⚠️" if s.get("flagged") else ""
                 lines.append(f"{i}. [{s['name']}]({s['url']}){flag_indicator}")
                 seen.add(s["url"])
-                if s.get("flagged"):
-                    flagged_urls.append(s['name'])
         lines.append("")
-
-        # Add note about flagged URLs
-        if flagged_urls:
-            lines.append("### Note on flagged URLs (⚠️)")
-            lines.append("Some URLs above are marked with ⚠️ because they couldn't be verified from the search results.")
-            lines.append("If a flagged link doesn't work, try searching the article title in Google—the original article is definitely out there!")
-            lines.append("")
 
     lines.append("---")
     lines.append(f"*Generated {now.strftime('%B %d, %Y at %I:%M %p')} · UAI × The Foundry*")
