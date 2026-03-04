@@ -112,38 +112,38 @@ Return up to 5 items ranked by significance. If nothing notable happened, return
 # ── URL validation against grounding ───────────────────────────────────
 def _validate_urls_against_grounding(items, grounding_chunks):
     """
-    Validate that returned URLs actually exist in grounding chunks.
-    If a URL is not found, mark it. If all URLs are invalid, filter the item.
+    Validate URLs against grounding chunks and mark unverified ones with a flag.
+    All items are kept; unverified URLs get a _url_flagged marker.
     """
     if not items or not grounding_chunks:
         return items
 
     chunk_urls = {chunk.get("url") for chunk in grounding_chunks if chunk.get("url")}
-    items_with_valid_urls = []
-    invalid_count = 0
+    verified_count = 0
+    flagged_count = 0
 
     for item in items:
         source_url = item.get("source_url", "").strip()
 
+        # Mark item if URL is missing
         if not source_url:
-            invalid_count += 1
+            item["_url_flagged"] = True
+            flagged_count += 1
             continue
 
         # Check if URL is in grounding results
         if source_url in chunk_urls:
-            items_with_valid_urls.append(item)
-            print(f"    ✓ URL verified in grounding: {_domain(source_url)}")
+            item["_url_flagged"] = False
+            verified_count += 1
+            print(f"    ✓ URL verified: {_domain(source_url)}")
         else:
-            # URL not in grounding - still keep it with a warning
-            # (Gemini might have found a valid article, just not from the chunks shown)
-            items_with_valid_urls.append(item)
-            print(f"    ⚠️  URL not in grounding chunks: {_domain(source_url)}")
-            invalid_count += 1
+            # URL not in grounding - flag it but keep the item
+            item["_url_flagged"] = True
+            flagged_count += 1
+            print(f"    ⚠️  URL flagged (unverified): {_domain(source_url)}")
 
-    if invalid_count > 0:
-        print(f"    {invalid_count} URLs were missing or unverified")
-
-    return items_with_valid_urls
+    print(f"    {verified_count} verified, {flagged_count} flagged")
+    return items
 
 
 # ── URL correction from grounding ────────────────────────────────────
@@ -277,12 +277,9 @@ def fetch_category(client, category):
             parsed = json.loads(clean[start:end])
             items = parsed.get("items", [])
 
-            # Validate URLs against grounding chunks
+            # Validate URLs against grounding chunks and mark flagged ones
             if items and sources:
                 items = _validate_urls_against_grounding(items, sources)
-
-            # Filter items without source_url
-            items = [item for item in items if item.get("source_url")]
 
             print(f"  [{category['id']}] Found {len(items)} items")
             return {"id": category["id"], "items": items, "sources": sources}
@@ -330,12 +327,14 @@ def format_digest(results):
             source_name = item.get("source_name", "Source")
             source_url = item.get("source_url", "")
             date = item.get("date", "")
+            is_flagged = item.get("_url_flagged", False)
 
+            flag = "⚠️ " if is_flagged else ""
             lines.append(f"**{i}. {title}**")
             lines.append(f"{summary}")
             if source_url:
-                lines.append(f"[{source_name}]({source_url}){' · ' + date if date else ''}")
-                all_sources.append({"name": source_name, "url": source_url})
+                lines.append(f"{flag}[{source_name}]({source_url}){' · ' + date if date else ''}")
+                all_sources.append({"name": source_name, "url": source_url, "flagged": is_flagged})
             lines.append("")
 
         lines.append("---")
@@ -346,11 +345,22 @@ def format_digest(results):
         lines.append("## 📚 All Sources Cited")
         lines.append("")
         seen = set()
+        flagged_urls = []
         for i, s in enumerate(all_sources, 1):
             if s["url"] not in seen:
-                lines.append(f"{i}. [{s['name']}]({s['url']})")
+                flag_indicator = " ⚠️" if s.get("flagged") else ""
+                lines.append(f"{i}. [{s['name']}]({s['url']}){flag_indicator}")
                 seen.add(s["url"])
+                if s.get("flagged"):
+                    flagged_urls.append(s['name'])
         lines.append("")
+
+        # Add note about flagged URLs
+        if flagged_urls:
+            lines.append("### Note on flagged URLs (⚠️)")
+            lines.append("Some URLs above are marked with ⚠️ because they couldn't be verified from the search results.")
+            lines.append("If a flagged link doesn't work, try searching the article title in Google—the original article is definitely out there!")
+            lines.append("")
 
     lines.append("---")
     lines.append(f"*Generated {now.strftime('%B %d, %Y at %I:%M %p')} · UAI × The Foundry*")
