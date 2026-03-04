@@ -369,8 +369,8 @@ def format_digest(results):
         has_flagged = any(s.get("flagged") for s in all_sources)
         if has_flagged:
             lines.append("### Note on flagged URLs (⚠️)")
-            lines.append("Some URLs below are marked with ⚠️ because they couldn't be verified or may not work (e.g. long redirect links).")
-            lines.append("If a flagged link doesn't work, try searching the article title in Google—the original article is definitely out there!")
+            lines.append("")
+            lines.append("Some URLs below are marked with ⚠️ because they couldn't be verified or may not work (e.g. long redirect links). If a flagged link doesn't work, try searching the article title in Google — the original article is definitely out there!")
             lines.append("")
         seen = set()
         for i, s in enumerate(all_sources, 1):
